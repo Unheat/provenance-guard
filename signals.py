@@ -27,7 +27,10 @@ def get_llm_score(text: str) -> dict: # return a json object with llm_score and 
         text: The text to analyze
     
     Returns:
-        float: Score 0.0 (human) to 1.0 (AI)
+        {
+        "llm_score": float 0.0-1.0,
+        "reasoning": str
+        }
     """ 
     try:
         response = client.chat.completions.create(
@@ -64,7 +67,10 @@ def get_stylometric_score(text: str) -> float:
         text: The text to analyze
     
     Returns:
-        float: Score 0.0 (human-like) to 1.0 (AI-like)
+        {
+        "stylometric_score": float 0.0-1.0
+        0.0 = likely human, 1.0 = likely AI
+        }
     """
     # Step 1: Split text into sentences
     # Step 2: Calculate sentence length variance
