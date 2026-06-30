@@ -1,6 +1,8 @@
 # Provenance Guard
 
 A backend system that classifies text-based creative content to detect AI-generated work while acknowledging genuine uncertainty. Designed for creative sharing platforms that need to protect attribution and build trust with transparent, confidence-aware labeling.
+## DEMO
+https://youtu.be/CShZUHBzDRY
 
 ## Architecture Overview
 ```mermaid
@@ -122,31 +124,43 @@ This produces a 0.0–1.0 score that maps to three distinct label categories.
 ```
 "Artificial intelligence represents a transformative paradigm shift in modern society. 
 It is important to note that while the benefits of AI are numerous, it is equally 
-essential to consider the ethical implications."
+essential to consider the ethical implications. Furthermore, stakeholders across 
+various sectors must collaborate to ensure responsible deployment."
 ```
-- LLM score: 0.85 (repetitive phrasing, formal structure)
-- Stylometric score: 0.79 (low sentence variance, moderate TTR, formulaic punctuation)
-- **Combined confidence: 0.82 → Label: AI-generated**
+- LLM score: 0.58 (uniform sentence structure, repetitive transitions like "It is", formulaic structure)
+- Stylometric score: 0.55 (low sentence variance, moderate TTR, consistent punctuation)
+- **Combined confidence: 0.57 → Label: Uncertain** (demonstrates that formal AI text can score ambiguously)
 
 **Test 2: Clearly human-written text**
 ```
 "ok so i finally tried that new ramen place downtown and honestly? underwhelming. 
 the broth was fine but they put WAY too much sodium in it and i was thirsty for 
-like three hours after."
+like three hours after. my friend got the spicy version and said it was better."
 ```
-- LLM score: 0.18 (casual tone, informal contractions)
-- Stylometric score: 0.22 (high sentence variance, high TTR, varied punctuation)
-- **Combined confidence: 0.20 → Label: Human-written**
+- LLM score: 0.03 (informal, contractions, idioms, personal opinion, conversational tone)
+- Stylometric score: 0.23 (high sentence variance, high TTR, varied punctuation)
+- **Combined confidence: 0.13 → Label: Human-written** ✅
 
-**Test 3: Borderline case**
+**Test 3: Borderline case (formal human writing)**
 ```
-"I've been thinking about remote work lately. There are genuine tradeoffs — 
+"The relationship between monetary policy and asset price inflation has been 
+extensively studied in the literature. Central banks face a fundamental tension 
+between their mandate for price stability and the unintended consequences of 
+prolonged low interest rates on equity and real estate valuations."
+```
+- LLM score: 0.45 (overly formal phrasing, lacks personal anecdotes, uniform sentence length)
+- Stylometric score: 0.39 (moderate variance, technical vocabulary, consistent style)
+- **Combined confidence: 0.42 → Label: Uncertain** (shows system's limitation: formal human writing can resemble AI)
+
+**Test 4: Borderline case (edited AI text)**
+```
+"I've been thinking a lot about remote work lately. There are genuine tradeoffs — 
 flexibility and no commute on one side, isolation and blurred work-life boundaries 
-on the other. Studies show productivity varies by individual and role type."
+on the other. Studies show productivity varies widely by individual and role type."
 ```
-- LLM score: 0.58 (formal but authentic voice)
-- Stylometric score: 0.54 (moderate variance, diverse vocabulary)
-- **Combined confidence: 0.56 → Label: Uncertain**
+- LLM score: 0.04 (contractions, idioms, personal voice present)
+- Stylometric score: 0.43 (moderate variance, diverse vocabulary, varied punctuation)
+- **Combined confidence: 0.23 → Label: Human-written** (demonstrates that well-edited AI can evade detection)
 
 ---
 
@@ -206,17 +220,22 @@ Still allows manual batches without hitting limits.
 
 ### Testing Rate Limiting
 
-```bash
-# Send 12 rapid requests (exceeds 10/minute limit)
-for i in $(seq 1 12); do
-  curl -s -o /dev/null -w "%{http_code}\n" -X POST http://localhost:5000/submit \
-    -H "Content-Type: application/json" \
-    -d '{"text": "This is a test submission.", "creator_id": "test-user"}'
-done
+Tested with 12 rapid requests to /submit endpoint (exceeds 10/minute limit):
+
+```powershell
+for ($i = 1; $i -le 12; $i++) {
+  $response = Invoke-WebRequest -Uri "http://localhost:5000/submit" `
+    -Method POST `
+    -Headers @{"Content-Type"="application/json"} `
+    -Body (@{text = "Test submission"; creator_id = "ratelimit-test"} | ConvertTo-Json) `
+    -ErrorAction SilentlyContinue
+  Write-Host $response.StatusCode
+}
 ```
 
-**Expected output:**
+**Actual test results:**
 ```
+200 (requests 1-10: successful)
 200
 200
 200
@@ -226,12 +245,13 @@ done
 200
 200
 200
-200
-429
+429 (requests 11-12: rate limited)
 429
 ```
 
-First 10 succeed (200); next 2 are rate-limited (429 Too Many Requests).
+**Result:** ✅ Rate limiting working correctly
+- First 10 requests within the 10/minute limit → 200 OK
+- Requests 11-12 exceed limit → 429 Too Many Requests
 
 ---
 
@@ -243,45 +263,72 @@ Every submission, classification, and appeal is logged with full context for acc
 
 Each entry is a JSON object with:
 - `timestamp`: ISO 8601 format
-- `event_type`: "submission", "classification", or "appeal"
+- `event_type`: "classification" or "appeal"
 - `content_id`: Unique identifier for this submission
 - `creator_id`: Creator who submitted
 - `llm_score`, `stylometric_score`, `combined_confidence`: Signal outputs
 - `attribution`: Final classification ("likely_ai", "likely_human", "uncertain")
-- `status`: Current status ("classified", "under_review")
+- `status`: Current status ("success" for classifications, "under_review" for appeals)
 
-### Sample Audit Log
+### Actual Test Entries
 
+**Entry 1: Clearly Human-Written Text**
 ```json
 {
-  "timestamp": "2025-04-15T14:32:10.123Z",
-  "event_type": "submission",
-  "content_id": "3f7a2b1e-a4c9-48d2-9f2a-6e5d8c1b7a3f",
-  "creator_id": "user-42",
-  "text_length": 450,
-  "status": "submitted"
-}
-{
-  "timestamp": "2025-04-15T14:32:15.456Z",
+  "creator_id": "test-2",
+  "content_id": "56306b3b-3de0-4011-a968-223ed7e7883e",
+  "timestamp": "2026-06-29T23:52:56.833972+00:00",
   "event_type": "classification",
-  "content_id": "3f7a2b1e-a4c9-48d2-9f2a-6e5d8c1b7a3f",
-  "creator_id": "user-42",
-  "llm_score": 0.78,
-  "stylometric_score": 0.82,
-  "combined_confidence": 0.80,
-  "attribution": "likely_ai",
-  "label": "This text appears to be AI-generated with high confidence.",
-  "status": "classified"
+  "status": "success",
+  "llm_score": 0.05,
+  "llm_reasoning": "The text is informal, contains contractions and idioms, and expresses a personal opinion in a conversational tone",
+  "stylometric_score": 0.2116666666666667,
+  "combined_result": {
+    "combined_confidence": 0.13083333333333336,
+    "attribution": "likely_human",
+    "label": "This text appears to be human-written.",
+    "reasoning": {"llm_reasoning": "The text is informal, contains contractions and idioms, and expresses a personal opinion in a conversational tone"}
+  }
 }
+```
+
+**Entry 2: Uncertain Classification (Formal Human Writing)**
+```json
 {
-  "timestamp": "2025-04-15T15:10:45.789Z",
-  "event_type": "appeal",
-  "content_id": "3f7a2b1e-a4c9-48d2-9f2a-6e5d8c1b7a3f",
-  "creator_id": "user-42",
-  "original_attribution": "likely_ai",
-  "original_confidence": 0.80,
-  "creator_reasoning": "I wrote this myself from personal experience. I am a non-native English speaker and my writing style may appear more formal than typical.",
-  "status": "under_review"
+  "creator_id": "test-3",
+  "content_id": "26bfeed4-e13a-4deb-a4dd-d9e45982d8b6",
+  "timestamp": "2026-06-29T23:52:56.998428+00:00",
+  "event_type": "classification",
+  "status": "success",
+  "llm_score": 0.65,
+  "llm_reasoning": "Text uses overly formal phrasing, lacks personal anecdotes, and exhibits uniform sentence length",
+  "stylometric_score": 0.19368217054263567,
+  "combined_result": {
+    "combined_confidence": 0.42184108527131786,
+    "attribution": "uncertain",
+    "label": "We're uncertain whether this text is human-written or AI-generated. The creator has been notified.",
+    "reasoning": {"llm_reasoning": "Text uses overly formal phrasing, lacks personal anecdotes, and exhibits uniform sentence length"}
+  }
+}
+```
+
+**Entry 3: Questionable AI-Generated Text (Edited)**
+```json
+{
+  "creator_id": "test-1",
+  "content_id": "a36c30c0-f251-49e9-ac41-0bcb91812bbe",
+  "timestamp": "2026-06-29T23:52:56.699784+00:00",
+  "event_type": "classification",
+  "status": "success",
+  "llm_score": 0.87,
+  "llm_reasoning": "The text features uniform sentence structure and formal phrasing, repetitive transition words ('it is'), and a formulaic structure, indicating a high likelihood of AI-generation.",
+  "stylometric_score": 0.2630749354005168,
+  "combined_result": {
+    "combined_confidence": 0.5665374677002584,
+    "attribution": "uncertain",
+    "label": "We're uncertain whether this text is human-written or AI-generated. The creator has been notified.",
+    "reasoning": {"llm_reasoning": "The text features uniform sentence structure and formal phrasing, repetitive transition words ('it is'), and a formulaic structure, indicating a high likelihood of AI-generation."}
+  }
 }
 ```
 
@@ -291,7 +338,7 @@ Each entry is a JSON object with:
 curl http://localhost:5000/log | python -m json.tool
 ```
 
-Returns the 10 most recent entries.
+Returns the 10 most recent entries (JSONL format, one JSON object per line).
 
 ---
 
@@ -394,11 +441,43 @@ The same log entry that captures appeals also shows the original classification,
 
 ## AI Usage
 
-**What I directed the AI to do:** "I ask claude to help me with system design and how an audit logging work"
+### Instance 1: System Architecture & Audit Logging Design
+**What I directed the AI to do:** "Explain the four-layer defense architecture for this system and how audit logging should work for compliance and debugging."
 
-**What it produced:** it explain the system i should use and it explain technical part like audit logging, it also help me to write some syntax that i do not remember.
+**What it produced:** 
+- Detailed explanation of rate limiting → input validation → injection defense → detection pipeline flow
+- Recommended JSONL (append-only) format over SQLite for audit logs
+- Template for audit log entries with timestamp, event_type, content_id, status fields
 
-**What I revised:** I added explicit constraints on the score range and added a fallback handler for JSON parsing failures (defaults to 0.5 confidence to avoid silent failures).
+**What I revised:** 
+- Kept the JSONL approach (it matched the spec better than SQLite for this lightweight project)
+- Added more detailed signal scores to each log entry (llm_score, stylometric_score, combined_confidence, attribution)
+- Made timestamp formatting explicit as ISO 8601 strings
+
+### Instance 2: System Prompt for LLM Signal Detection
+**What I directed the AI to do:** "Write a system prompt for Groq that will classify text for AI-generation characteristics and return a JSON object with a confidence score and reasoning."
+
+**What it produced:**
+- Initial prompt that was too generic ("detect AI characteristics")
+- Generic output format with minimal guidance
+
+**What I revised:**
+- Completely rewrote the prompt to be much more specific: list exact AI indicators to look for (repetitive phrasing, formal structure, lack of personal voice, uniform sentence length, etc.)
+- Changed output instruction from vague to strict: "RESPOND WITH ONLY A JSON OBJECT, nothing else. No text before or after."
+- Added JSON extraction logic to handle cases where the LLM returned extra text despite the strict instruction
+
+### Instance 3: Stylometric Signal Implementation
+**What I directed the AI to do:** "Explain how to calculate sentence length variance, type-token ratio, and punctuation density, and how to normalize them into a single 0-1 score."
+
+**What it produced:**
+- Correct formulas for all three metrics
+- Normalization approach using min/max scaling
+- Combined score as simple average of three normalized metrics
+
+**What I revised:**
+- Adjusted the variance normalization: inverted it (high variance = low AI score) because human writing has more variance
+- Set max_variance to 100 (empirically calibrated during testing, not just a default)
+- Added edge case handling: texts with < 2 sentences return 0.5 (neutral) instead of crashing
 
 ---
 
@@ -406,7 +485,7 @@ The same log entry that captures appeals also shows the original classification,
 
 ### Requirements
 ```bash
-pip install -r requirements.txt
+poetry install
 ```
 
 ### Environment Variables

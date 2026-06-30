@@ -2,23 +2,31 @@ from dotenv import load_dotenv
 import os
 from groq import Groq
 import json
+from config import LLM_MODEL, LLM_TEMPERATURE, STYLOMETRIC_MAX_VARIANCE
 load_dotenv()
 
 # for stat score
 import statistics
 import nltk
-nltk.download("punkt")
+nltk.download("punkt_tab")
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-SYSTEM_PROMPT = """
-    You are a AI-text-detection analyser. 
-    You should give high score if you think user's text is AI-generated, and low score for human-write text 
-    You also need to provide reasoning for your score provide which AI characteristics you found in user's text contain 
-    or human characteristics you found in this text to clarify for your score.
-    Return a JSON object with:
-    - llm_score: 0.0-1.0 confidence that text is AI-generated, you must just give a float number here
-    - reasoning: one sentence explanation"
-    example output: {"llm_score": 0.85, "reasoning": "The text has a high degree of repetitiveness and lacks personal anecdotes, which are common in AI-generated content."}
-    """
+SYSTEM_PROMPT = """You are an AI-text-detection analyzer. Score text on AI-generation likelihood.
+
+Look for these AI indicators (score higher if present):
+- Repetitive phrasing or word choices (e.g., "It is important to note that")
+- Overly formal or structured reasoning without personal voice
+- Generic transitions and connecting phrases
+- Lack of contractions, idioms, or conversational tone
+- Absence of personal anecdotes or specific details
+- Uniform sentence length and rhythm
+- Over-explanation of obvious points
+- Formulaic structure (intro→body→conclusion)
+
+RESPOND WITH ONLY A JSON OBJECT, nothing else. No text before or after.
+
+{"llm_score": 0.75, "reasoning": "The text uses repetitive formal phrases and lacks personal voice"}
+
+Where llm_score is 0.0 (human) to 1.0 (AI)."""
 def get_llm_score(text: str) -> dict: # return a json object with llm_score and reasoning
     """
     Ask Groq: does this text look AI-generated?
@@ -44,16 +52,28 @@ def get_llm_score(text: str) -> dict: # return a json object with llm_score and 
                     "content": text
                 }
             ],
-            model="llama3-8b-8192",
-            temperature=0.8
+            model=LLM_MODEL,
+            temperature=LLM_TEMPERATURE
         )
         content_str = response.choices[0].message.content
-        
-        # 1. Type guard: explicit check to eliminate 'None' from the type union
+
         if content_str is None:
             return {"llm_score": 0.0, "reasoning": "Error: Received empty response from LLM."}
-        
-        # 2. Pylance now knows content_str is strictly 'str'
+
+        # Try to extract JSON from the response (in case LLM adds extra text)
+        content_str = content_str.strip()
+        if content_str.startswith('{'):
+            # Find the closing brace
+            brace_count = 0
+            for i, char in enumerate(content_str):
+                if char == '{':
+                    brace_count += 1
+                elif char == '}':
+                    brace_count -= 1
+                    if brace_count == 0:
+                        return json.loads(content_str[:i+1])
+
+        # Fallback: try parsing the whole thing
         return json.loads(content_str)
         
     except Exception as e:
@@ -101,9 +121,8 @@ def get_stylometric_score(text: str) -> float:
         punctuation_marks = sum(1 for char in text if char in punctuation)
         punctuation_density = punctuation_marks / len(words) if len(words) > 0 else 0
         
-        max_variance = 100  # Adjust based on empirical data or domain knowledge
         # Normalize metrics to 0-1 range
-        normalized_variance = 1 - (variance / max_variance)  # Invert: low variance = high AI score
+        normalized_variance = 1 - (variance / STYLOMETRIC_MAX_VARIANCE)  # Invert: low variance = high AI score
         normalized_ttr = 1 - ttr                              # Invert: low TTR = high AI score
         normalized_density = punctuation_density           # Keep as-is? Or adjust?
 

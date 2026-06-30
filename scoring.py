@@ -1,3 +1,5 @@
+from config import SCORE_THRESHOLD_LOW, SCORE_THRESHOLD_HIGH
+
 def combine_signals(llm_result: dict, stylometric_score: float) -> dict:
     """
     Combine two signals into a single confidence score and label.
@@ -18,10 +20,10 @@ def combine_signals(llm_result: dict, stylometric_score: float) -> dict:
         llm_reasoning = llm_result.get("reasoning", "No reasoning provided.")
         
         combined_confidence = (llm_score + stylometric_score) / 2
-        if combined_confidence < 0.35:
+        if combined_confidence < SCORE_THRESHOLD_LOW:
             attribution = "likely_human"
             label = "This text appears to be human-written."
-        elif combined_confidence > 0.65:
+        elif combined_confidence > SCORE_THRESHOLD_HIGH:
             attribution = "likely_ai"
             label = "This text appears to be AI-generated with high confidence."
         else:
